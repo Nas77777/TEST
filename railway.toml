@@ -1,0 +1,11 @@
+[services.backend]
+root = "backend"
+buildCommand = "pip install -r requirements.txt"
+startCommand = "gunicorn app:app --bind 0.0.0.0:$PORT"
+
+[services.frontend]
+root = "frontend"
+buildCommand = "npm install && npm run build"
+staticPublishPath = "dist"
+# Set VITE_API_BASE_URL in Railway dashboard to point at the deployed backend, e.g.
+# https://your-backend-service.up.railway.app/api
