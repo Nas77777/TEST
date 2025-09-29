@@ -7,11 +7,13 @@ This application requires an OpenAI API key to function properly.
 ### Local Development Setup
 
 1. Copy the example environment file:
+
    ```bash
    cp .env.example .env
    ```
 
 2. Edit the `.env` file and replace `your_openai_api_key_here` with your actual OpenAI API key:
+
    ```
    api_key="sk-proj-your-actual-api-key-here"
    ```
@@ -23,6 +25,7 @@ This application requires an OpenAI API key to function properly.
 For production deployments (Railway, Heroku, etc.), set the environment variable through your platform's dashboard:
 
 **Railway:**
+
 1. Go to your Railway project dashboard
 2. Navigate to the backend service
 3. Go to "Variables" tab
@@ -36,12 +39,14 @@ Set the environment variable `OPENAI_API_KEY` with your OpenAI API key value.
 ## Installation
 
 1. Create and activate a virtual environment:
+
    ```bash
    python -m venv .venv
    source .venv/bin/activate  # On macOS/Linux
    ```
 
 2. Install dependencies:
+
    ```bash
    pip install -r requirements.txt
    ```

@@ -25,21 +25,18 @@ load_dotenv(dotenv_path)
 
 # Try to get API key from various sources for flexibility
 API_KEY = (
-    os.getenv("OPENAI_API_KEY") or      # Standard OpenAI environment variable (for production)
-    os.getenv("api_key") or             # Our local .env file variable
-    None
+    os.getenv("OPENAI_API_KEY") or  # Production-style environment variable
+    os.getenv("api_key")             # Local .env variable
 )
 
 if not API_KEY:
-    raise ValueError(
-        "OpenAI API key not found. Please set either:\n"
-        "- OPENAI_API_KEY environment variable (recommended for production)\n"
-        "- api_key in your .env file (for local development)\n"
-        "See backend/README.md for setup instructions."
+    print(
+        "Warning: OpenAI API key not configured. AI generation endpoints will respond with an error.\n"
+        "Set OPENAI_API_KEY in your deployment environment or add api_key to backend/.env for local use."
     )
 
-# Configure OpenAI client
-client = openai.Client(api_key=API_KEY)
+# Configure OpenAI client lazily so the app can boot even without a key
+client = openai.Client(api_key=API_KEY) if API_KEY else None
 
 
 ITEM_TEMPLATES = [
@@ -97,6 +94,9 @@ def generate_player_id():
 
 
 def generate_theme_from_user_input(user_input: str, default_items: int = 15):
+    if not client:
+        raise RuntimeError("OpenAI API key is not configured on the server")
+
     match = re.search(r'(\d+)', user_input)
     num_items = int(match.group(1)) if match else default_items
 
@@ -151,6 +151,14 @@ def generate_theme():
     try:
         theme = generate_theme_from_user_input(user_prompt)
         return jsonify(theme)
+    except RuntimeError as runtime_error:
+        return (
+            jsonify({
+                "error": str(runtime_error),
+                "hint": "Provide OPENAI_API_KEY (recommended) or disable AI generation in the UI."
+            }),
+            503,
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
