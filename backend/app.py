@@ -22,7 +22,21 @@ if not os.path.exists(dotenv_path):
     dotenv_path = find_dotenv()
 
 load_dotenv(dotenv_path)
-API_KEY = os.getenv("api_key")
+
+# Try to get API key from various sources for flexibility
+API_KEY = (
+    os.getenv("OPENAI_API_KEY") or      # Standard OpenAI environment variable (for production)
+    os.getenv("api_key") or             # Our local .env file variable
+    None
+)
+
+if not API_KEY:
+    raise ValueError(
+        "OpenAI API key not found. Please set either:\n"
+        "- OPENAI_API_KEY environment variable (recommended for production)\n"
+        "- api_key in your .env file (for local development)\n"
+        "See backend/README.md for setup instructions."
+    )
 
 # Configure OpenAI client
 client = openai.Client(api_key=API_KEY)

@@ -4,7 +4,7 @@
 
 This application requires an OpenAI API key to function properly.
 
-### Setup Instructions
+### Local Development Setup
 
 1. Copy the example environment file:
    ```bash
@@ -17,6 +17,21 @@ This application requires an OpenAI API key to function properly.
    ```
 
 3. Never commit the `.env` file to version control as it contains sensitive information.
+
+### Production Deployment Setup
+
+For production deployments (Railway, Heroku, etc.), set the environment variable through your platform's dashboard:
+
+**Railway:**
+1. Go to your Railway project dashboard
+2. Navigate to the backend service
+3. Go to "Variables" tab
+4. Add a new variable:
+   - Name: `OPENAI_API_KEY`
+   - Value: `your_actual_openai_api_key_here`
+
+**Other platforms:**
+Set the environment variable `OPENAI_API_KEY` with your OpenAI API key value.
 
 ## Installation
 
@@ -36,6 +51,10 @@ This application requires an OpenAI API key to function properly.
    flask run
    ```
 
+## Deployment
+
+The application is configured to work with Railway using the `railway.toml` configuration file. Make sure to set the `OPENAI_API_KEY` environment variable in your Railway dashboard before deploying.
+
 ## Security Note
 
-The `.env` file is included in `.gitignore` to prevent accidental commits of sensitive information.
+The `.env` file is included in `.gitignore` to prevent accidental commits of sensitive information. Always use environment variables for production deployments.
