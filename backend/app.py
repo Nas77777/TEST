@@ -2,12 +2,31 @@ import random
 import string
 import time
 from uuid import uuid4
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+import openai 
+import os 
+from dotenv import find_dotenv, load_dotenv
+import re 
+import json
 
 app = Flask(__name__)
 CORS(app)
+
+# Load environment variables - be explicit about the path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+dotenv_path = os.path.join(script_dir, '.env')
+
+# Fallback to find_dotenv if explicit path doesn't work
+if not os.path.exists(dotenv_path):
+    dotenv_path = find_dotenv()
+
+load_dotenv(dotenv_path)
+API_KEY = os.getenv("api_key")
+
+# Configure OpenAI client
+client = openai.Client(api_key=API_KEY)
+
 
 ITEM_TEMPLATES = [
     {
@@ -61,6 +80,66 @@ def generate_game_id():
 def generate_player_id():
     return uuid4().hex
 
+
+
+def generate_theme_from_user_input(user_input: str, default_items: int = 15):
+    match = re.search(r'(\d+)', user_input)
+    num_items = int(match.group(1)) if match else default_items
+
+    prompt = f"""
+    Generate a themed auction collection for a blind-bidding game.
+    Theme (from user): {user_input}
+    Number of items: {num_items}
+
+    Output format (JSON only):
+    {{
+      "id": "<machine-readable-id>",
+      "name": "<Theme Name>",
+      "description": "<short description>",
+      "items": [
+        {{"emoji": "X", "name": "Item Name", "value": number}},
+        ...
+      ]
+    }}
+
+    Rules:
+    - Use fitting emojis.
+    - Values between 100 and 1000.
+    - Ensure varied values (not all clustered).
+    - Return ONLY valid JSON, no explanations.
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=600,
+        response_format={"type": "json_object"}
+    )
+
+    return json.loads(response.choices[0].message.content)
+
+
+@app.route("/generate-theme", methods=["POST"])
+def generate_theme():
+    """
+    Example request:
+    curl -X POST http://localhost:5000/generate-theme \
+         -H "Content-Type: application/json" \
+         -d '{"prompt": "generate me items for a soccer theme"}'
+    """
+    data = request.get_json()
+    if not data or "prompt" not in data:
+        return jsonify({"error": "Missing 'prompt' in request body"}), 400
+
+    user_prompt = data["prompt"]
+
+    try:
+        theme = generate_theme_from_user_input(user_prompt)
+        return jsonify(theme)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 
 def make_item(item):
     return {
@@ -149,7 +228,7 @@ def serialize_game(game, player_id):
         "isHost": player_id == game["host_id"],
         "history": history_view,
     }
-
+    
     if player:
         payload["player"] = {
             "id": player["id"],
@@ -207,6 +286,7 @@ def create_game():
     host_name = (data.get("hostName") or "Host").strip()
     template_id = data.get("templateId")
     custom_items = data.get("items") or []
+    generated_items = data.get("generatedItems") or []
 
     if not host_name:
         return jsonify({"error": "Host name is required"}), 400
@@ -276,6 +356,9 @@ def create_game():
             "isHost": True,
         },
     })
+
+
+
 
 
 @app.post("/api/games/<game_id>/join")

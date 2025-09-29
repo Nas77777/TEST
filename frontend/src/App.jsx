@@ -1,7 +1,38 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api'
+const stripTrailingSlash = (value) => value.replace(/\/$/, '')
+const ensureLeadingSlash = (value) => (value.startsWith('/') ? value : `/${value}`)
+
+const resolveApiBaseUrl = () => {
+  const fromEnv = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (fromEnv) return stripTrailingSlash(fromEnv)
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:5000/api'
+    }
+    return stripTrailingSlash(`${origin}/api`)
+  }
+  return '/api'
+}
+
+const API_BASE_URL = resolveApiBaseUrl()
+const apiUrl = (path) => `${API_BASE_URL}${ensureLeadingSlash(path)}`
+
+const resolveGenerateThemeUrl = () => {
+  const fromEnv = import.meta.env.VITE_GENERATE_THEME_URL?.trim()
+  if (fromEnv) return fromEnv
+  if (typeof window !== 'undefined') {
+    const { hostname } = window.location
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://127.0.0.1:5000/generate-theme'
+    }
+  }
+  return `${API_BASE_URL}/ai/items`
+}
+
+const GENERATE_THEME_URL = resolveGenerateThemeUrl()
 
 const defaultCustomItem = { emoji: '❔', name: '', value: '' }
 
@@ -16,11 +47,12 @@ function App() {
   const [bidAmount, setBidAmount] = useState('')
   const [bidLocked, setBidLocked] = useState(false)
   const [roundKey, setRoundKey] = useState('')
+  const [generateInput, setGenerateInput] = useState('')
 
   useEffect(() => {
     const loadTemplates = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/templates`)
+        const res = await fetch(apiUrl('/templates'))
         if (!res.ok) throw new Error('Failed to load templates')
         const data = await res.json()
         setTemplates(data.templates || [])
@@ -39,7 +71,7 @@ function App() {
 
     const fetchState = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/games/${gameId}?playerId=${player.id}`)
+        const res = await fetch(apiUrl(`/games/${gameId}?playerId=${player.id}`))
         if (!res.ok) throw new Error('Game not found')
         const data = await res.json()
         if (!cancelled) {
@@ -90,6 +122,12 @@ function App() {
       const payload = { hostName }
       if (mode === 'template') {
         payload.templateId = selectedTemplate
+      } else if (mode === 'generated') {
+        payload.items = customItems.map((item) => ({
+          emoji: item.emoji || '❔',
+          name: item.name,
+          value: Number(item.value),
+        }))
       } else {
         payload.items = customItems.map((item) => ({
           emoji: item.emoji || '❔',
@@ -97,7 +135,7 @@ function App() {
           value: Number(item.value),
         }))
       }
-      const res = await fetch(`${API_BASE_URL}/games`, {
+      const res = await fetch(apiUrl('/games'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -122,7 +160,7 @@ function App() {
     setBusy(true)
     setFeedback('')
     try {
-      const res = await fetch(`${API_BASE_URL}/games/${requestedGameId}/join`, {
+      const res = await fetch(apiUrl(`/games/${requestedGameId}/join`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -148,7 +186,7 @@ function App() {
     setBusy(true)
     setFeedback('')
     try {
-      const res = await fetch(`${API_BASE_URL}/games/${gameId}/start`, {
+      const res = await fetch(apiUrl(`/games/${gameId}/start`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId: player.id }),
@@ -170,7 +208,7 @@ function App() {
     setBusy(true)
     setFeedback('')
     try {
-      const res = await fetch(`${API_BASE_URL}/games/${gameId}/bid`, {
+      const res = await fetch(apiUrl(`/games/${gameId}/bid`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId: player.id, amount: Number(bidAmount) }),
@@ -193,7 +231,7 @@ function App() {
     setBusy(true)
     setFeedback('')
     try {
-      const res = await fetch(`${API_BASE_URL}/games/${gameId}/next`, {
+      const res = await fetch(apiUrl(`/games/${gameId}/next`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId: player.id }),
@@ -213,8 +251,6 @@ function App() {
     if (!gameState?.players) return []
     return [...gameState.players].sort((a, b) => b.balance - a.balance)
   }, [gameState])
-
-  const currentItem = gameState?.currentItem
 
   return (
     <div className="app-shell">
@@ -244,6 +280,8 @@ function App() {
             disabled={busy}
             onCancel={() => setView('landing')}
             onCreate={handleCreateGame}
+            generateInput={generateInput}
+            setGenerateInput={setGenerateInput}
           />
         )}
 
@@ -307,17 +345,65 @@ function Landing({ onCreate, onJoin }) {
   )
 }
 
-function CreateGameForm({ templates, onCancel, onCreate, disabled }) {
+function CreateGameForm({ templates, onCancel, onCreate, disabled, generateInput, setGenerateInput }) {
   const [hostName, setHostName] = useState('')
   const [mode, setMode] = useState('template')
   const [templateId, setTemplateId] = useState(templates[0]?.id || '')
   const [customItems, setCustomItems] = useState([{ ...defaultCustomItem }])
+  const [generatedTemplate, setGeneratedTemplate] = useState(null)
+  const [aiMessage, setAiMessage] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
 
   useEffect(() => {
     if (!templateId && templates.length) {
       setTemplateId(templates[0].id)
     }
   }, [templates, templateId])
+
+  const generatedItems = useMemo(() => {
+    if (!generatedTemplate?.items) return []
+    return generatedTemplate.items
+  }, [generatedTemplate])
+
+  const requestGeneratedTemplate = async (label = 'Generating') => {
+    if (!generateInput.trim()) return
+    setAiBusy(true)
+    setAiMessage(`🎲 ${label} items...`)
+    try {
+      const res = await fetch(GENERATE_THEME_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userInput: generateInput, prompt: generateInput }),
+      })
+      if (!res.ok) throw new Error('Failed to generate items')
+      const data = await res.json()
+      const rawTemplate = (() => {
+        if (data.template) {
+          return typeof data.template === 'string' ? JSON.parse(data.template) : data.template
+        }
+        return data
+      })()
+      if (!rawTemplate || !Array.isArray(rawTemplate.items)) {
+        throw new Error('Invalid AI response')
+      }
+      const normalised = {
+        ...rawTemplate,
+        items: rawTemplate.items.map((item, index) => ({
+          emoji: item.emoji || '❔',
+          name: item.name || `Item ${index + 1}`,
+          value: Number(item.value) || 0,
+        })),
+      }
+      setGeneratedTemplate(normalised)
+      setAiMessage('✅ Items ready! Review them below.')
+    } catch (error) {
+      console.error(error)
+      setGeneratedTemplate(null)
+      setAiMessage('❌ Unable to generate items right now. Please try again.')
+    } finally {
+      setAiBusy(false)
+    }
+  }
 
   const updateCustomItem = (index, key, value) => {
     setCustomItems((prev) => prev.map((item, idx) => (idx === index ? { ...item, [key]: value } : item)))
@@ -335,11 +421,13 @@ function CreateGameForm({ templates, onCancel, onCreate, disabled }) {
     event.preventDefault()
     if (!hostName.trim()) return
     if (mode === 'template' && !templateId) return
-
+    if (mode === 'generated' && (!generatedItems || generatedItems.length === 0)) return
     if (mode === 'custom') {
       const filtered = customItems.filter((item) => item.name && item.value)
       if (!filtered.length) return
       onCreate(hostName.trim(), mode, templateId, filtered)
+    } else if (mode === 'generated') {
+      onCreate(hostName.trim(), mode, templateId, generatedItems)
     } else {
       onCreate(hostName.trim(), mode, templateId, customItems)
     }
@@ -366,6 +454,14 @@ function CreateGameForm({ templates, onCancel, onCreate, disabled }) {
         >
           Use Template
         </button>
+
+        {/* AI Generated Items */}
+        <button type="button" 
+        className={mode === 'generated' ? 'active' : ''}
+        onClick={() => setMode('generated')}>
+          AI Generated Items
+        </button>
+
         <button type="button" className={mode === 'custom' ? 'active' : ''} onClick={() => setMode('custom')}>
           Custom Items
         </button>
@@ -393,6 +489,107 @@ function CreateGameForm({ templates, onCancel, onCreate, disabled }) {
               </div>
             </label>
           ))}
+        </div>
+      ) : mode === 'generated' ? (
+        <div className="ai-generated-section">
+          <div className="ai-input-section">
+            <h3>🤖 AI Item Generator</h3>
+            <p className="description">Describe your theme and let AI create unique auction items for you!</p>
+            
+            <div className="input-group">
+              <input
+                type="text"
+                value={generateInput}
+                onChange={(e) => setGenerateInput(e.target.value)}
+                placeholder="e.g., #7 'spooky haunted mansion items' or 'futuristic space gadgets and'"
+                className="ai-input"
+              />
+              <button
+                type="button"
+                className={`generate-btn ${!generateInput.trim() || aiBusy ? 'disabled' : ''}`}
+                onClick={() => requestGeneratedTemplate('Generating unique')}
+                disabled={!generateInput.trim() || aiBusy}
+              >
+                {aiBusy ? (
+                  <>
+                    <span className="spinner">⟳</span> Generating...
+                  </>
+                ) : (
+                  <>🎯 Generate Items</>
+                )}
+              </button>
+            </div>
+
+            {aiMessage && (
+              <div
+                className={`ai-feedback ${
+                  aiBusy
+                    ? 'loading'
+                    : aiMessage.startsWith('❌')
+                      ? 'error'
+                      : 'success'
+                }`}
+              >
+                {aiMessage}
+              </div>
+            )}
+          </div>
+
+          {generatedTemplate && generatedItems.length > 0 && (
+            <div className="generated-items-display">
+              <div className="display-header">
+                <div>
+                  <h4>✨ {generatedTemplate.name || 'Generated Items'} ({generatedItems.length})</h4>
+                  {generatedTemplate.description && <p className="generated-description">{generatedTemplate.description}</p>}
+                </div>
+                <button
+                  type="button"
+                  className="regenerate-btn"
+                  onClick={() => requestGeneratedTemplate('Regenerating')}
+                  disabled={aiBusy || !generateInput.trim()}
+                >
+                  🔄 Regenerate
+                </button>
+              </div>
+              
+              <div className="items-grid">
+                {generatedItems.map((item, idx) => (
+                  <div key={idx} className="generated-item-card">
+                    <div className="item-emoji">{item.emoji || '❔'}</div>
+                    <div className="item-details">
+                      <div className="item-name">{item.name}</div>
+                      <div className="item-value">{item.value} credits</div>
+                    </div>
+                    <div className="item-index">#{idx + 1}</div>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="generation-summary">
+                <p className="summary-text">
+                  🎊 Perfect! These {generatedItems.length} items are ready for your auction game.
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {(!generatedItems || generatedItems.length === 0) && (
+            <div className="empty-state">
+              <div className="empty-icon">🎭</div>
+              <p>Enter a theme above to generate unique auction items!</p>
+              <div className="example-themes">
+                <span className="example-tag" onClick={() => setGenerateInput('medieval fantasy items')}>
+                  🏰 Medieval Fantasy
+                </span>
+                <span className="example-tag" onClick={() => setGenerateInput('retro arcade items')}>
+                  🕹️ Retro Arcade
+                </span>
+                <span className="example-tag" onClick={() => setGenerateInput('underwater treasures')}>
+                  🌊 Ocean Treasures
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="custom-items">
@@ -438,8 +635,17 @@ function CreateGameForm({ templates, onCancel, onCreate, disabled }) {
         <button type="button" className="ghost" onClick={onCancel} disabled={disabled}>
           Back
         </button>
-        <button className="primary" type="submit" disabled={disabled}>
-          Create
+        <button 
+          className="primary" 
+          type="submit" 
+          disabled={disabled || (mode === 'generated' && (!generatedItems || generatedItems.length === 0))}
+        >
+          {mode === 'generated' && (!generatedItems || generatedItems.length === 0) 
+            ? 'Generate Items First' 
+            : disabled 
+              ? 'Creating...' 
+              : 'Create Game'
+          }
         </button>
       </div>
     </form>
@@ -470,7 +676,7 @@ function JoinGameForm({ onJoin, onCancel, disabled }) {
       </label>
       <label>
         Your name
-        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nova" required />
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" required />
       </label>
       <div className="form-actions">
         <button type="button" className="ghost" onClick={onCancel} disabled={disabled}>
