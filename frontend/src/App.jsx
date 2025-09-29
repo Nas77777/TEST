@@ -22,14 +22,16 @@ const apiUrl = (path) => `${API_BASE_URL}${ensureLeadingSlash(path)}`
 
 const resolveGenerateThemeUrl = () => {
   const fromEnv = import.meta.env.VITE_GENERATE_THEME_URL?.trim()
-  if (fromEnv) return fromEnv
+  if (fromEnv) return stripTrailingSlash(fromEnv)
   if (typeof window !== 'undefined') {
-    const { hostname } = window.location
+    const { hostname, origin } = window.location
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://127.0.0.1:5000/generate-theme'
     }
+    return `${stripTrailingSlash(origin)}/generate-theme`
   }
-  return `${API_BASE_URL}/ai/items`
+  const apiOrigin = stripTrailingSlash(API_BASE_URL.replace(/\/api$/, ''))
+  return `${apiOrigin}/generate-theme`
 }
 
 const GENERATE_THEME_URL = resolveGenerateThemeUrl()
